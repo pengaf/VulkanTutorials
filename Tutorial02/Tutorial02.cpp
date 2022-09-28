@@ -1,4 +1,4 @@
-#include "Tutorial01.h"
+#include "Tutorial02.h"
 
 #include<qmessagebox.h>
 #include <QAbstractEventDispatcher>
@@ -139,7 +139,14 @@ bool CheckPhysicalDevice(uint32_t& graphicsQueueFamilyIndex, uint32_t& presentQu
 	return graphicsQueueFamilyIndex != UINT32_MAX && presentQueueFamilyIndex != UINT32_MAX;
 }
 
-Tutorial01::Tutorial01(QWidget *parent)
+
+struct VertexData
+{
+	float x, y, z, w;
+	float r, g, b, a;
+};
+
+Tutorial02::Tutorial02(QWidget *parent)
     : QMainWindow(parent)
 {
     ui.setupUi(this);
@@ -188,7 +195,7 @@ Tutorial01::Tutorial01(QWidget *parent)
 	{
 		VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		nullptr,
-		"Tutorial01",
+		"Tutorial02",
 		VK_MAKE_VERSION(1,0,0),
 		"VulkanTutorials",
 		VK_MAKE_VERSION(1,0,0),
@@ -325,15 +332,6 @@ Tutorial01::Tutorial01(QWidget *parent)
 	vkGetDeviceQueue(device, selectedPhysicalDevice.graphicsQueueFamilyIndex, 0, &graphicsQueue);
 	vkGetDeviceQueue(device, selectedPhysicalDevice.presentQueueFamilyIndex, 0, &presentQueue);
 
-	VkSemaphoreCreateInfo semaphoreCreateInfo =
-	{
-		VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
-		nullptr,
-		0
-	};
-	VkSemaphore imageAvailableSemaphore, renderingFinishedSemaphore;
-	vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAvailableSemaphore);
-	vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderingFinishedSemaphore);
 
 	m_surface = surface;
 	m_physicalDevice = selectedPhysicalDevice.physicalDevice;
@@ -342,15 +340,79 @@ Tutorial01::Tutorial01(QWidget *parent)
 	m_presentQueueFamilyIndex = selectedPhysicalDevice.presentQueueFamilyIndex;
 	m_graphicsQueue = graphicsQueue;
 	m_presentQueue = presentQueue;
-	m_imageAvailableSemaphore = imageAvailableSemaphore;
-	m_renderingFinishedSemaphore = renderingFinishedSemaphore;
 
+	init();
 }
 
-Tutorial01::~Tutorial01()
-{}
+Tutorial02::~Tutorial02()
+{
+	clear();
+}
 
-bool Tutorial01::createSwapChain()
+bool Tutorial02::init()
+{
+	if (!createSwapChain())
+	{
+		return false;
+	}
+	if (!createRenderingResources())
+	{
+		return false;
+	}
+	if (!createRenderPass())
+	{
+		return false;
+	}
+	if (!createPipeline())
+	{
+		return false;
+	}
+	if (!createVertexBuffer2())
+	{
+		return false;
+	}
+	return true;
+}
+
+void Tutorial02::clear()
+{
+	if (m_device != VK_NULL_HANDLE)
+	{
+		vkDeviceWaitIdle(m_device);
+		VkCommandBuffer commandBuffers[rendering_resource_count];
+		for (uint32_t i =0; i< rendering_resource_count;++i)
+		{
+			commandBuffers[i] = m_renderingResources[i].m_commandBuffer;
+		}
+		vkFreeCommandBuffers(m_device, m_graphicsCommandPool, rendering_resource_count, commandBuffers);
+		for (uint32_t i = 0; i < rendering_resource_count; ++i)
+		{
+			vkDestroyFramebuffer(m_device, m_renderingResources[i].m_framebuffer, nullptr);
+			vkDestroySemaphore(m_device, m_renderingResources[i].m_imageAvailableSemaphore, nullptr);
+			vkDestroySemaphore(m_device, m_renderingResources[i].m_renderingFinishedSemaphore, nullptr);
+			vkDestroyFence(m_device, m_renderingResources[i].m_fence, nullptr);
+		}
+
+		if (m_graphicsCommandPool != VK_NULL_HANDLE)
+		{
+			vkDestroyCommandPool(m_device, m_graphicsCommandPool, nullptr);
+			m_graphicsCommandPool = VK_NULL_HANDLE;
+		}
+		if (m_pipeline != VK_NULL_HANDLE)
+		{
+			vkDestroyPipeline(m_device, m_pipeline, nullptr);
+			m_pipeline = VK_NULL_HANDLE;
+		}
+		if (m_renderPass != VK_NULL_HANDLE)
+		{
+			vkDestroyRenderPass(m_device, m_renderPass, nullptr);
+			m_renderPass = VK_NULL_HANDLE;
+		}
+	}
+}
+
+
+bool Tutorial02::createSwapChain()
 {
 	VkResult result;
 	if (m_device != VK_NULL_HANDLE)
@@ -541,7 +603,7 @@ bool Tutorial01::createSwapChain()
 	return true;
 }
 
-bool Tutorial01::createRenderPass()
+bool Tutorial02::createRenderPass()
 {
 	VkResult result;
 	VkAttachmentDescription attachmentDescription =
@@ -577,6 +639,28 @@ bool Tutorial01::createRenderPass()
 		nullptr,
 	};
 
+	VkSubpassDependency subpassDependencies[]=
+	{
+		{
+			VK_SUBPASS_EXTERNAL,
+			0,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_ACCESS_MEMORY_READ_BIT,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_DEPENDENCY_BY_REGION_BIT,
+		},
+		{
+			0,
+			VK_SUBPASS_EXTERNAL,
+			VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_ACCESS_MEMORY_READ_BIT,
+			VK_DEPENDENCY_BY_REGION_BIT,
+		},
+	};
+
 	VkRenderPassCreateInfo renderPassCreateInfo =
 	{
 		VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
@@ -586,8 +670,8 @@ bool Tutorial01::createRenderPass()
 		&attachmentDescription,
 		1,
 		&subpassDescription,
-		0,
-		nullptr,
+		sizeof(subpassDependencies)/sizeof(subpassDependencies[0]),
+		subpassDependencies,
 	};
 
 	VkRenderPass renderPass;
@@ -600,45 +684,73 @@ bool Tutorial01::createRenderPass()
 	return true;
 }
 
-bool Tutorial01::createFrameBuffers()
+bool Tutorial02::createRenderingResources()
 {
-	for (size_t i=0;i<m_frameBuffers.size();++i)
-	{
-		VkFramebuffer frameBuffer = m_frameBuffers[i];
-		if (frameBuffer != VK_NULL_HANDLE)
-		{
-			vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
-		}
-		m_frameBuffers[i] = VK_NULL_HANDLE;
-	}
-		
 	VkResult result;
-	uint32_t imageCount = m_swapChainImages.size();
-	m_frameBuffers.resize(imageCount, VK_NULL_HANDLE);
-	for (uint32_t i = 0; i < imageCount; ++i)
+
+	VkCommandPoolCreateInfo commandPoolCreateInfo =
 	{
-		VkFramebufferCreateInfo frameBufferCreateInfo =
-		{
-			VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-			nullptr,
-			0,
-			m_renderPass,
-			1,
-			&m_swapChainImages[i].m_imageView,
-			m_swapChainExtent.width,
-			m_swapChainExtent.height,
-			1,
-		};
-		result = vkCreateFramebuffer(m_device, &frameBufferCreateInfo, nullptr, &m_frameBuffers[i]);
-		if (result != VK_SUCCESS)
-		{
-			return false;
-		}
+		VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+		nullptr,
+		0,
+		m_graphicsQueueFamilyIndex
+	};
+
+	result = vkCreateCommandPool(m_device, &commandPoolCreateInfo, nullptr, &m_graphicsCommandPool);
+	if (result != VK_SUCCESS)
+	{
+		QMessageBox::critical(nullptr, "error", "create command pool failed");
+		return false;
+	}
+
+	VkCommandBuffer commandBuffers[rendering_resource_count];
+	VkCommandBufferAllocateInfo commandBufferAllocateInfo =
+	{
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+		nullptr,
+		m_graphicsCommandPool,
+		VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+		rendering_resource_count,
+	};
+	result = vkAllocateCommandBuffers(m_device, &commandBufferAllocateInfo, commandBuffers);
+	if (result != VK_SUCCESS)
+	{
+		QMessageBox::critical(nullptr, "error", "allocate command buffers failed");
+		return false;
+	}
+
+	for (uint32_t i = 0; i < rendering_resource_count; ++i)
+	{
+		m_renderingResources[i].m_commandBuffer = commandBuffers[i];
+	}
+
+	VkSemaphoreCreateInfo semaphoreCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+		nullptr,
+		0
+	};
+	for (uint32_t i = 0; i < rendering_resource_count; ++i)
+	{
+		vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr, &m_renderingResources[i].m_imageAvailableSemaphore);
+		vkCreateSemaphore(m_device, &semaphoreCreateInfo, nullptr, &m_renderingResources[i].m_renderingFinishedSemaphore);
+	}
+
+	VkFenceCreateInfo fenceCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
+		nullptr, 
+		VK_FENCE_CREATE_SIGNALED_BIT
+	};
+	for (uint32_t i = 0; i < rendering_resource_count; ++i)
+	{
+		vkCreateFence(m_device, &fenceCreateInfo, nullptr, &m_renderingResources[i].m_fence);
 	}
 	return true;
 }
 
-VkShaderModule Tutorial01::createShaderModule(const char* fileName)
+
+VkShaderModule Tutorial02::createShaderModule(const char* fileName)
 {
 	VkResult result;
 	std::vector<char> shaderCode = GetBinaryFileContents(fileName);
@@ -665,13 +777,311 @@ VkShaderModule Tutorial01::createShaderModule(const char* fileName)
 	return shaderModule;
 }
 
-bool Tutorial01::createPipeline()
+bool Tutorial02::createVertexBuffer()
+{
+	VkResult result;
+	VertexData vertexData[] = 
+	{
+	  {
+		-0.7f, -0.7f, 0.0f, 1.0f,
+		1.0f, 0.0f, 0.0f, 0.0f
+	  },
+	  {
+		-0.7f, 0.7f, 0.0f, 1.0f,
+		0.0f, 1.0f, 0.0f, 0.0f
+	  },
+	  {
+		0.7f, -0.7f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f, 0.0f
+	  },
+	  {
+		0.7f, 0.7f, 0.0f, 1.0f,
+		0.3f, 0.3f, 0.3f, 0.0f
+	  }
+	};
+	m_vertexBuffer.m_size = sizeof(vertexData);
+	
+	VkBufferCreateInfo bufferCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		nullptr,
+		0,
+		m_vertexBuffer.m_size,
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		VK_SHARING_MODE_EXCLUSIVE,
+		0,
+		nullptr,
+	};
+
+	result = vkCreateBuffer(m_device, &bufferCreateInfo, nullptr, &m_vertexBuffer.m_buffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkMemoryRequirements memoryRequirements;
+	vkGetBufferMemoryRequirements(m_device, m_vertexBuffer.m_buffer, &memoryRequirements);
+
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+		if (memoryRequirements.memoryTypeBits & 1 << i 
+			&&
+			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+		{
+			VkMemoryAllocateInfo allocateInfo =
+			{
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				nullptr,
+				m_vertexBuffer.m_size,
+				i
+			};
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_vertexBuffer.m_deviceMemory);
+			if (result == VK_SUCCESS)
+			{
+				break;
+			}
+		}
+	}
+	if (m_vertexBuffer.m_deviceMemory == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+	result = vkBindBufferMemory(m_device, m_vertexBuffer.m_buffer, m_vertexBuffer.m_deviceMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	void* mappedPtr;
+	result = vkMapMemory(m_device, m_vertexBuffer.m_deviceMemory, 0, m_vertexBuffer.m_size, 0, &mappedPtr);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	memcpy(mappedPtr, vertexData, m_vertexBuffer.m_size);
+	VkMappedMemoryRange mappedMemoryRange =
+	{
+		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+		nullptr,
+		m_vertexBuffer.m_deviceMemory,
+		0,
+		m_vertexBuffer.m_size,
+	};
+	vkFlushMappedMemoryRanges(m_device, 1, &mappedMemoryRange);
+	vkUnmapMemory(m_device, m_vertexBuffer.m_deviceMemory);
+	return true;
+}
+
+bool Tutorial02::createVertexBuffer2()
+{
+	VkResult result;
+	VertexData vertexData[] =
+	{
+	  {
+		-0.7f, -0.7f, 0.0f, 1.0f,
+		1.0f, 0.0f, 0.0f, 0.0f
+	  },
+	  {
+		-0.7f, 0.7f, 0.0f, 1.0f,
+		0.0f, 1.0f, 0.0f, 0.0f
+	  },
+	  {
+		0.7f, -0.7f, 0.0f, 1.0f,
+		0.0f, 0.0f, 1.0f, 0.0f
+	  },
+	  {
+		0.7f, 0.7f, 0.0f, 1.0f,
+		0.3f, 0.3f, 0.3f, 0.0f
+	  }
+	};
+
+	VkMemoryRequirements memoryRequirements;
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+	m_vertexBuffer.m_size = sizeof(vertexData);
+	
+	VkBufferCreateInfo deviceBufferCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		nullptr,
+		0,
+		m_vertexBuffer.m_size,
+		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_SHARING_MODE_EXCLUSIVE,
+		0,
+		nullptr,
+	};
+	result = vkCreateBuffer(m_device, &deviceBufferCreateInfo, nullptr, &m_vertexBuffer.m_buffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkGetBufferMemoryRequirements(m_device, m_vertexBuffer.m_buffer, &memoryRequirements);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+		if (memoryRequirements.memoryTypeBits & 1 << i
+			&&
+			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+		{
+			VkMemoryAllocateInfo allocateInfo =
+			{
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				nullptr,
+				m_vertexBuffer.m_size,
+				i
+			};
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_vertexBuffer.m_deviceMemory);
+			if (result == VK_SUCCESS)
+			{
+				break;
+			}
+		}
+	}
+	if (m_vertexBuffer.m_deviceMemory == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+	result = vkBindBufferMemory(m_device, m_vertexBuffer.m_buffer, m_vertexBuffer.m_deviceMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkBufferCreateInfo stagingBufferCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		nullptr,
+		0,
+		m_vertexBuffer.m_size,
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+		VK_SHARING_MODE_EXCLUSIVE,
+		0,
+		nullptr,
+	};
+	
+	VkBuffer stagingBuffer;
+	result = vkCreateBuffer(m_device, &deviceBufferCreateInfo, nullptr, &stagingBuffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	vkGetBufferMemoryRequirements(m_device, stagingBuffer, &memoryRequirements);
+
+	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+		if (memoryRequirements.memoryTypeBits & 1 << i
+			&&
+			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+		{
+			VkMemoryAllocateInfo allocateInfo =
+			{
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				nullptr,
+				m_vertexBuffer.m_size,
+				i
+			};
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &stagingMemory);
+			if (result == VK_SUCCESS)
+			{
+				break;
+			}
+		}
+	}
+	if (stagingMemory == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+	result = vkBindBufferMemory(m_device, stagingBuffer, stagingMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	void* mappedPtr;
+	result = vkMapMemory(m_device, stagingMemory, 0, m_vertexBuffer.m_size, 0, &mappedPtr);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	memcpy(mappedPtr, vertexData, m_vertexBuffer.m_size);
+	VkMappedMemoryRange mappedMemoryRange =
+	{
+		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+		nullptr,
+		stagingMemory,
+		0,
+		m_vertexBuffer.m_size,
+	};
+	vkFlushMappedMemoryRanges(m_device, 1, &mappedMemoryRange);
+	vkUnmapMemory(m_device, stagingMemory);
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo =
+	{
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		nullptr,
+		VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		nullptr,
+	};
+
+	VkCommandBuffer commandBuffer = m_renderingResources[0].m_commandBuffer;
+
+	vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
+	
+	VkBufferCopy bufferCopy = 
+	{
+		0,
+		0,
+		m_vertexBuffer.m_size,
+	};
+	vkCmdCopyBuffer(commandBuffer, stagingBuffer, m_vertexBuffer.m_buffer, 1, &bufferCopy);
+
+	VkBufferMemoryBarrier bufferMemoryBarrier =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+		nullptr,
+		VK_ACCESS_MEMORY_WRITE_BIT,
+		VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+		VK_QUEUE_FAMILY_IGNORED,
+		VK_QUEUE_FAMILY_IGNORED,
+		m_vertexBuffer.m_buffer,
+		0,
+		VK_WHOLE_SIZE,
+	};
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+	vkEndCommandBuffer(commandBuffer);
+	VkSubmitInfo submitInfo =
+	{
+		VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		nullptr,
+		0,
+		nullptr,
+		0,
+		1,
+		&commandBuffer,
+		0,
+		nullptr,
+	};
+	result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkDeviceWaitIdle(m_device);
+	return true;
+}
+
+bool Tutorial02::createPipeline()
 {
 	std::string path(QCoreApplication::applicationDirPath().toStdString());
 
 	VkResult result;
-	VkShaderModule vertexShaderModule = createShaderModule((path + "/shader01.vert.spv").c_str());
-	VkShaderModule fragmentShaderModule = createShaderModule((path + "/shader01.frag.spv").c_str());
+	VkShaderModule vertexShaderModule = createShaderModule((path + "/shader02.vert.spv").c_str());
+	VkShaderModule fragmentShaderModule = createShaderModule((path + "/shader02.frag.spv").c_str());
 	if (VK_NULL_HANDLE == vertexShaderModule || VK_NULL_HANDLE == fragmentShaderModule)
 	{
 		return false;
@@ -699,15 +1109,40 @@ bool Tutorial01::createPipeline()
 		},
 	};
 
+	VkVertexInputBindingDescription vertexInputBindingDescriptions[] =
+	{
+		{
+			0,
+			sizeof(VertexData),
+			VK_VERTEX_INPUT_RATE_VERTEX,
+		},
+	};
+
+	VkVertexInputAttributeDescription vertexInputAttributeDescriptions[]=
+	{
+		{
+			0,
+			0,
+			VK_FORMAT_R32G32B32A32_SFLOAT,
+			0,
+		},
+		{
+			1,
+			0,
+			VK_FORMAT_R32G32B32A32_SFLOAT,
+			sizeof(float) * 4,
+		},
+	};
+
 	VkPipelineVertexInputStateCreateInfo vertexInputStateCreateInfo =
 	{
 		VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
 		nullptr,
 		0,
-		0,
-		nullptr,
-		0,
-		nullptr,
+		sizeof(vertexInputBindingDescriptions)/sizeof(vertexInputBindingDescriptions[0]),
+		vertexInputBindingDescriptions,
+		sizeof(vertexInputAttributeDescriptions)/sizeof(vertexInputAttributeDescriptions[0]),
+		vertexInputAttributeDescriptions,
 	};
 
 	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo =
@@ -715,29 +1150,10 @@ bool Tutorial01::createPipeline()
 		VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
 		nullptr,
 		0,
-		VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+		VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
 		VK_FALSE,
 	};
 
-	VkViewport viewport = 
-	{
-		0,
-		0,
-		m_swapChainExtent.width,
-		m_swapChainExtent.height,
-		0,
-		1
-	};
-
-	VkRect2D scissor =
-	{
-		{
-			0,0
-		},
-		{
-			m_swapChainExtent.width, m_swapChainExtent.height,
-		}
-	};
 
 	VkPipelineViewportStateCreateInfo viewportStateCreateInfo =
 	{
@@ -745,9 +1161,9 @@ bool Tutorial01::createPipeline()
 		nullptr,
 		0,
 		1,
-		&viewport,
+		nullptr,
 		1,
-		&scissor,
+		nullptr,
 	};
 
 	VkPipelineRasterizationStateCreateInfo rasterizationStateCreateInfo =
@@ -804,6 +1220,21 @@ bool Tutorial01::createPipeline()
 		{0,0,0,0},
 	};
 
+	VkDynamicState dynamicStates[] =
+	{
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR,
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicStateCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+		nullptr,
+		0,
+		sizeof(dynamicStates) / sizeof(dynamicStates[0]),
+		dynamicStates,
+	};
+
 	VkPipelineLayoutCreateInfo layoutCreateInfo =
 	{
 		VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
@@ -837,7 +1268,7 @@ bool Tutorial01::createPipeline()
 		&multisampleStateCreateInfo,
 		nullptr,
 		&colorBlendStateCreateInfo,
-		nullptr,
+		&dynamicStateCreateInfo,
 		pipelineLayout,
 		m_renderPass,
 		0,
@@ -853,167 +1284,22 @@ bool Tutorial01::createPipeline()
 	return true;
 }
 
-bool Tutorial01::createCommandBuffers()
+bool Tutorial02::draw()
 {
 	VkResult result;
-	//uint32_t imageCount = 0;
-	//result = vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
-	//if (result != VK_SUCCESS || imageCount == 0)
-	//{
-	//	QMessageBox::critical(nullptr, "error", "get swapchain images failed");
-	//	return false;
-	//}
-
-	VkCommandPoolCreateInfo commandPoolCreateInfo =
-	{
-		VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
-		nullptr,
-		0,
-		m_graphicsQueueFamilyIndex
-	};
-
-	result = vkCreateCommandPool(m_device, &commandPoolCreateInfo, nullptr, &m_graphicsCommandPool);
-	if (result != VK_SUCCESS)
-	{
-		QMessageBox::critical(nullptr, "error", "create command pool failed");
-		return false;
-	}
-
-	uint32_t imageCount = m_swapChainImages.size();
-	m_graphicsCommandBuffers.resize(imageCount, VK_NULL_HANDLE);
-	VkCommandBufferAllocateInfo commandBufferAllocateInfo =
-	{
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
-		nullptr,
-		m_graphicsCommandPool,
-		VK_COMMAND_BUFFER_LEVEL_PRIMARY,
-		imageCount,
-	};
-	result = vkAllocateCommandBuffers(m_device, &commandBufferAllocateInfo, m_graphicsCommandBuffers.data());
-	if (result != VK_SUCCESS)
-	{
-		QMessageBox::critical(nullptr, "error", "allocate command buffers failed");
-		return false;
-	}
-	return true;
-}
-
-bool Tutorial01::recordCommands()
-{
-	VkResult result;
-	//uint32_t imageCount = m_presentQueueCommandBuffers.size();
-	//std::vector<VkImage> images(imageCount);
-	//result = vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, images.data());
-	//if (result != VK_SUCCESS)
-	//{
-	//	QMessageBox::critical(nullptr, "error", "get swapchain images failed");
-	//	return false;
-	//}
-
-	VkCommandBufferBeginInfo commandBufferBeginInfo =
-	{
-		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-		nullptr,
-		VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT,
-		nullptr,
-	};
-
-	VkClearValue clearValue =
-	{
-		{0,0,0,0},
-	};
-
-	VkImageSubresourceRange imageSubresourceRange =
-	{
-		VK_IMAGE_ASPECT_COLOR_BIT,
-		0,
-		1,
-		0,
-		1,
-	};
-
-	uint32_t imageCount = m_swapChainImages.size();
-
-	for (uint32_t i = 0; i < imageCount; ++i)
-	{
-		VkImage image = m_swapChainImages[i].m_image;
-		VkCommandBuffer commandBuffer = m_graphicsCommandBuffers[i];
-		vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
-
-		if(m_graphicsQueue != m_presentQueue)
-		{
-			VkImageMemoryBarrier presentToDrawBarrier =
-			{
-				VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-				nullptr,
-				VK_ACCESS_MEMORY_READ_BIT,
-				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_IMAGE_LAYOUT_UNDEFINED,
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				m_presentQueueFamilyIndex,
-				m_graphicsQueueFamilyIndex,
-				image,
-				imageSubresourceRange
-			};
-			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentToDrawBarrier);
-
-		}
-
-		VkRenderPassBeginInfo renderPassBeginInfo =
-		{
-			VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-			nullptr,
-			m_renderPass,
-			m_frameBuffers[i],
-			{
-				{
-					0,
-					0,
-				},
-				{
-					m_swapChainExtent.width, 
-					m_swapChainExtent.height,
-				},
-			},
-			1,
-			&clearValue,
-		};
-		vkCmdBeginRenderPass(commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
-		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-		vkCmdEndRenderPass(commandBuffer);
-
-		if (m_graphicsQueue != m_presentQueue)
-		{
-			VkImageMemoryBarrier drawToPresentBarrier =
-			{
-				VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-				nullptr,
-				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-				VK_ACCESS_MEMORY_READ_BIT,
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-				m_graphicsQueueFamilyIndex,
-				m_presentQueueFamilyIndex,
-				image,
-				imageSubresourceRange
-			};
-			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &drawToPresentBarrier);
-		}
-		result = vkEndCommandBuffer(commandBuffer);
-		if (result != VK_SUCCESS)
-		{
-			return false;
-		}
-	}
-	return true;
-}
-
-bool Tutorial01::draw()
-{
-	VkResult result;
+	static uint32_t s_resourceIndex = 0;
+	RenderingResource& renderingResource = m_renderingResources[s_resourceIndex];
 	uint32_t imageIndex;
-	result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+	s_resourceIndex = (s_resourceIndex + 1) % rendering_resource_count;
+
+	result = vkWaitForFences(m_device, 1, &renderingResource.m_fence, VK_FALSE, 1000000000ULL);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkResetFences(m_device, 1, &renderingResource.m_fence);
+
+	result = vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, renderingResource.m_imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
 	switch (result)
 	{
 	case VK_SUCCESS:
@@ -1025,20 +1311,163 @@ bool Tutorial01::draw()
 		return false;
 	}
 
+	SwapchainImage& swapchainImage = m_swapChainImages[imageIndex];
+
+	if (renderingResource.m_framebuffer != VK_NULL_HANDLE)
+	{
+		vkDestroyFramebuffer(m_device, renderingResource.m_framebuffer, nullptr);
+	}
+
+	VkFramebufferCreateInfo framebufferCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		nullptr,
+		0,
+		m_renderPass,
+		1,
+		&swapchainImage.m_imageView,
+		m_swapChainExtent.width,
+		m_swapChainExtent.height,
+		1,
+	};
+
+	result = vkCreateFramebuffer(m_device, &framebufferCreateInfo, nullptr, &renderingResource.m_framebuffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo =
+	{
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		nullptr,
+		VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		nullptr,
+	};
+	vkBeginCommandBuffer(renderingResource.m_commandBuffer, &commandBufferBeginInfo);
+
+	VkImageSubresourceRange imageSubresourceRange =
+	{
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		0,
+		1,
+		0,
+		1,
+	};
+
+	if (m_graphicsQueue != m_presentQueue)
+	{
+		VkImageMemoryBarrier presentToDrawBarrier =
+		{
+			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			nullptr,
+			VK_ACCESS_MEMORY_READ_BIT,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			m_presentQueueFamilyIndex,
+			m_graphicsQueueFamilyIndex,
+			swapchainImage.m_image,
+			imageSubresourceRange
+		};
+		vkCmdPipelineBarrier(renderingResource.m_commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 1, &presentToDrawBarrier);
+	}
+
+
+	VkClearValue clearValue =
+	{
+		{0,0,0,0},
+	};
+	VkRenderPassBeginInfo renderPassBeginInfo =
+	{
+		VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+		nullptr,
+		m_renderPass,
+		renderingResource.m_framebuffer,
+		{
+			{
+				0,
+				0,
+			},
+			{
+				m_swapChainExtent.width,
+				m_swapChainExtent.height,
+			},
+		},
+		1,
+		&clearValue,
+	};
+
+	vkCmdBeginRenderPass(renderingResource.m_commandBuffer, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+	vkCmdBindPipeline(renderingResource.m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+
+	VkViewport viewport =
+	{
+		0,
+		0,
+		m_swapChainExtent.width,
+		m_swapChainExtent.height,
+		0,
+		1,
+	};
+	
+	VkRect2D scissor =
+	{
+		{
+			0,
+			0
+		},
+		{
+			m_swapChainExtent.width,
+			m_swapChainExtent.height,
+		},
+	};
+
+	vkCmdSetViewport(renderingResource.m_commandBuffer, 0, 1, &viewport);
+	vkCmdSetScissor(renderingResource.m_commandBuffer, 0, 1, &scissor);
+	VkDeviceSize offset = 0;
+	vkCmdBindVertexBuffers(renderingResource.m_commandBuffer, 0, 1, &m_vertexBuffer.m_buffer, &offset);
+	vkCmdDraw(renderingResource.m_commandBuffer, 4, 1, 0, 0);
+	vkCmdEndRenderPass(renderingResource.m_commandBuffer);
+
+	if (m_graphicsQueue != m_presentQueue)
+	{
+		VkImageMemoryBarrier drawToPresentBarrier =
+		{
+			VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			nullptr,
+			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			VK_ACCESS_MEMORY_READ_BIT,
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+			m_graphicsQueueFamilyIndex,
+			m_presentQueueFamilyIndex,
+			swapchainImage.m_image,
+			imageSubresourceRange
+		};
+		vkCmdPipelineBarrier(renderingResource.m_commandBuffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &drawToPresentBarrier);
+	}
+
+	result = vkEndCommandBuffer(renderingResource.m_commandBuffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
 	VkPipelineStageFlags waitDstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	VkSubmitInfo submitInfo =
 	{
 		VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		nullptr,
 		1,
-		&m_imageAvailableSemaphore,
+		&renderingResource.m_imageAvailableSemaphore,
 		&waitDstStageMask,
 		1,
-		&m_graphicsCommandBuffers[imageIndex],
+		&renderingResource.m_commandBuffer,
 		1,
-		&m_renderingFinishedSemaphore,
+		&renderingResource.m_renderingFinishedSemaphore,
 	};
-	result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, renderingResource.m_fence);
 	if (result != VK_SUCCESS)
 	{
 		return false;
@@ -1049,7 +1478,7 @@ bool Tutorial01::draw()
 		VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
 		nullptr,
 		1,
-		&m_renderingFinishedSemaphore,
+		&renderingResource.m_renderingFinishedSemaphore,
 		1,
 		&m_swapChain,
 		&imageIndex,
@@ -1067,81 +1496,25 @@ bool Tutorial01::draw()
 	default:
 		return false;
 	}
-
 	return true;
 }
 
-void Tutorial01::clear()
+
+bool Tutorial02::onSizeWindow()
 {
-	if (m_device != VK_NULL_HANDLE)
-	{
-		vkDeviceWaitIdle(m_device);
-		if (!m_graphicsCommandBuffers.empty())
-		{
-			vkFreeCommandBuffers(m_device, m_graphicsCommandPool, m_graphicsCommandBuffers.size(), m_graphicsCommandBuffers.data());
-			m_graphicsCommandBuffers.clear();
-		}
-		if (m_graphicsCommandPool != VK_NULL_HANDLE)
-		{
-			vkDestroyCommandPool(m_device, m_graphicsCommandPool, nullptr);
-			m_graphicsCommandPool = VK_NULL_HANDLE;
-		}
-		if (m_pipeline != VK_NULL_HANDLE)
-		{
-			vkDestroyPipeline(m_device, m_pipeline, nullptr);
-			m_pipeline = VK_NULL_HANDLE;
-		}
-		if (m_renderPass != VK_NULL_HANDLE)
-		{
-			vkDestroyRenderPass(m_device, m_renderPass, nullptr);
-			m_renderPass = VK_NULL_HANDLE;
-		}
-		for(auto frameBuffer: m_frameBuffers)
-		{
-			vkDestroyFramebuffer(m_device, frameBuffer, nullptr);
-		}
-		m_frameBuffers.clear();
-	}
-}
-
-
-bool Tutorial01::onSizeWindow()
-{
-	clear();
-
 	if (!createSwapChain())
 	{
 		return false;
 	}
-	if (!createRenderPass())
-	{
-		return false;
-	}
-	if (!createFrameBuffers())
-	{
-		return false;
-	}
-	if (!createPipeline())
-	{
-		return false;
-	}
-	if (!createCommandBuffers())
-	{
-		return false;
-	}
-	if (!recordCommands())
-	{
-		return false;
-	}
 	return true;
 }
 
-void Tutorial01::resizeEvent(QResizeEvent* e)
+void Tutorial02::resizeEvent(QResizeEvent* e)
 {
 	onSizeWindow();
 }
 
-void Tutorial01::timerEvent(QTimerEvent *event)
+void Tutorial02::timerEvent(QTimerEvent *event)
 {
 	draw();
 }

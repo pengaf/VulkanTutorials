@@ -39,3 +39,4 @@ link_directories(${VULKAN_DIR}/lib)
 find_package(Qt5 COMPONENTS Widgets REQUIRED)
 
 add_subdirectory(Tutorial01)
+add_subdirectory(Tutorial02)
