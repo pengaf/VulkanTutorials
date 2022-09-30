@@ -18,7 +18,7 @@ if(NOT EXISTS ${VULKAN_KEY_FILE})
 	return()
 endif()
 
-set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED false)
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG ${PROJECT_SOURCE_DIR}/bin)
@@ -40,3 +40,4 @@ find_package(Qt5 COMPONENTS Widgets REQUIRED)
 
 add_subdirectory(Tutorial01)
 add_subdirectory(Tutorial02)
+add_subdirectory(Tutorial03)

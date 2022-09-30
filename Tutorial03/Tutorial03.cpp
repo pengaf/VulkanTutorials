@@ -1,4 +1,4 @@
-#include "Tutorial02.h"
+#include "Tutorial03.h"
 
 #include<qmessagebox.h>
 #include <QAbstractEventDispatcher>
@@ -6,6 +6,9 @@
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
+#define STB_IMAGE_IMPLEMENTATION
+#include "../Thirdparty/stb_image.h"
 
 std::vector<char> GetBinaryFileContents(char const* filename) {
 
@@ -143,10 +146,10 @@ bool CheckPhysicalDevice(uint32_t& graphicsQueueFamilyIndex, uint32_t& presentQu
 struct VertexData
 {
 	float x, y, z, w;
-	float r, g, b, a;
+	float u, v;
 };
 
-Tutorial02::Tutorial02(QWidget *parent)
+Tutorial03::Tutorial03(QWidget *parent)
     : QMainWindow(parent)
 {
     ui.setupUi(this);
@@ -195,7 +198,7 @@ Tutorial02::Tutorial02(QWidget *parent)
 	{
 		VK_STRUCTURE_TYPE_APPLICATION_INFO,
 		nullptr,
-		"Tutorial02",
+		"Tutorial03",
 		VK_MAKE_VERSION(1,0,0),
 		"VulkanTutorials",
 		VK_MAKE_VERSION(1,0,0),
@@ -344,12 +347,12 @@ Tutorial02::Tutorial02(QWidget *parent)
 	init();
 }
 
-Tutorial02::~Tutorial02()
+Tutorial03::~Tutorial03()
 {
 	clear();
 }
 
-bool Tutorial02::init()
+bool Tutorial03::init()
 {
 	if (!createSwapChain())
 	{
@@ -363,18 +366,34 @@ bool Tutorial02::init()
 	{
 		return false;
 	}
-	if (!createPipeline())
+	if (!createStagingBuffer())
 	{
 		return false;
 	}
-	if (!createVertexBuffer2())
+	if (!createTexture())
+	{
+		return false;
+	}
+	if (!createVertexBuffer())
+	{
+		return false;
+	}
+	if (!createUniformBuffer())
+	{
+		return false;
+	}	
+	if (!createDescriptorSet())
+	{
+		return false;
+	}	
+	if (!createPipeline())
 	{
 		return false;
 	}
 	return true;
 }
 
-void Tutorial02::clear()
+void Tutorial03::clear()
 {
 	if (m_device != VK_NULL_HANDLE)
 	{
@@ -412,7 +431,7 @@ void Tutorial02::clear()
 }
 
 
-bool Tutorial02::createSwapChain()
+bool Tutorial03::createSwapChain()
 {
 	VkResult result;
 	if (m_device != VK_NULL_HANDLE)
@@ -603,7 +622,7 @@ bool Tutorial02::createSwapChain()
 	return true;
 }
 
-bool Tutorial02::createRenderPass()
+bool Tutorial03::createRenderPass()
 {
 	VkResult result;
 	VkAttachmentDescription attachmentDescription =
@@ -684,7 +703,7 @@ bool Tutorial02::createRenderPass()
 	return true;
 }
 
-bool Tutorial02::createRenderingResources()
+bool Tutorial03::createRenderingResources()
 {
 	VkResult result;
 
@@ -750,7 +769,7 @@ bool Tutorial02::createRenderingResources()
 }
 
 
-VkShaderModule Tutorial02::createShaderModule(const char* fileName)
+VkShaderModule Tutorial03::createShaderModule(const char* fileName)
 {
 	VkResult result;
 	std::vector<char> shaderCode = GetBinaryFileContents(fileName);
@@ -777,56 +796,40 @@ VkShaderModule Tutorial02::createShaderModule(const char* fileName)
 	return shaderModule;
 }
 
-bool Tutorial02::createVertexBuffer()
+
+bool Tutorial03::createStagingBuffer()
 {
 	VkResult result;
-	VertexData vertexData[] = 
-	{
-	  {
-		-0.7f, -0.7f, 0.0f, 1.0f,
-		1.0f, 0.0f, 0.0f, 0.0f
-	  },
-	  {
-		-0.7f, 0.7f, 0.0f, 1.0f,
-		0.0f, 1.0f, 0.0f, 0.0f
-	  },
-	  {
-		0.7f, -0.7f, 0.0f, 1.0f,
-		0.0f, 0.0f, 1.0f, 0.0f
-	  },
-	  {
-		0.7f, 0.7f, 0.0f, 1.0f,
-		0.3f, 0.3f, 0.3f, 0.0f
-	  }
-	};
-	m_vertexBuffer.m_size = sizeof(vertexData);
-	
-	VkBufferCreateInfo bufferCreateInfo =
+	const uint32_t stagingBufferSize = 1 * 1024 * 1024;
+	m_stagingBuffer.m_size = stagingBufferSize;
+
+	VkBufferCreateInfo stagingBufferCreateInfo =
 	{
 		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
 		nullptr,
 		0,
-		m_vertexBuffer.m_size,
-		VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+		m_stagingBuffer.m_size,
+		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
 		VK_SHARING_MODE_EXCLUSIVE,
 		0,
 		nullptr,
 	};
 
-	result = vkCreateBuffer(m_device, &bufferCreateInfo, nullptr, &m_vertexBuffer.m_buffer);
+	result = vkCreateBuffer(m_device, &stagingBufferCreateInfo, nullptr, &m_stagingBuffer.m_buffer);
 	if (result != VK_SUCCESS)
 	{
 		return false;
 	}
 
-	VkMemoryRequirements memoryRequirements;
-	vkGetBufferMemoryRequirements(m_device, m_vertexBuffer.m_buffer, &memoryRequirements);
-
 	VkPhysicalDeviceMemoryProperties memoryProperties;
 	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+	VkMemoryRequirements memoryRequirements;
+	vkGetBufferMemoryRequirements(m_device, m_stagingBuffer.m_buffer, &memoryRequirements);
+
 	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
 	{
-		if (memoryRequirements.memoryTypeBits & 1 << i 
+		if (memoryRequirements.memoryTypeBits & 1 << i
 			&&
 			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
 		{
@@ -834,65 +837,312 @@ bool Tutorial02::createVertexBuffer()
 			{
 				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 				nullptr,
-				m_vertexBuffer.m_size,
+				m_stagingBuffer.m_size,
 				i
 			};
-			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_vertexBuffer.m_deviceMemory);
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_stagingBuffer.m_deviceMemory);
 			if (result == VK_SUCCESS)
 			{
 				break;
 			}
 		}
 	}
-	if (m_vertexBuffer.m_deviceMemory == VK_NULL_HANDLE)
+	if (m_stagingBuffer.m_deviceMemory == VK_NULL_HANDLE)
 	{
 		return false;
 	}
-	result = vkBindBufferMemory(m_device, m_vertexBuffer.m_buffer, m_vertexBuffer.m_deviceMemory, 0);
+	result = vkBindBufferMemory(m_device, m_stagingBuffer.m_buffer, m_stagingBuffer.m_deviceMemory, 0);
 	if (result != VK_SUCCESS)
 	{
 		return false;
 	}
+	return true;
+}
+
+bool Tutorial03::createTexture()
+{
+	VkResult result;
+
+	std::filesystem::path path(QCoreApplication::applicationDirPath().toStdString());
+	path = path.parent_path() / "assets/texture.png";
+	std::vector<char> fileContents = GetBinaryFileContents(path.string().c_str());
+	if (fileContents.empty())
+	{
+		return false;
+	}
+
+	int req_comp = 4;
+	int width = 0, height = 0, components = 0;
+	unsigned char *imageData = stbi_load_from_memory(reinterpret_cast<unsigned char*>(&fileContents[0]), static_cast<int>(fileContents.size()), &width, &height, &components, req_comp);
+	
+	if ((imageData == nullptr) ||
+		(width <= 0) ||
+		(height <= 0) ||
+		(components <= 0))
+	{
+		std::cout << "Could not read image data!" << std::endl;
+		return false;
+	}
+
+	auto xxx = [](unsigned char* imageData) {stbi_image_free(imageData); };
+	std::unique_ptr<unsigned char,  decltype(xxx)> autoDeleter(imageData,xxx);
+	{size_t _ = sizeof(autoDeleter); }
+
+	int imageSize = (width) * (height) * (req_comp <= 0 ? components : req_comp);
+
+	VkImageCreateInfo imageCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+		nullptr,
+		0,
+		VK_IMAGE_TYPE_2D,
+		VK_FORMAT_R8G8B8A8_UNORM,
+		{
+			width,
+			height,
+			1,
+		},
+		1,
+		1,
+		VK_SAMPLE_COUNT_1_BIT,
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+		VK_SHARING_MODE_EXCLUSIVE,
+		0,
+		nullptr,
+		VK_IMAGE_LAYOUT_UNDEFINED,
+	};
+
+	result = vkCreateImage(m_device, &imageCreateInfo, nullptr, &m_texture.m_image);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	VkMemoryRequirements memoryRequirements;
+	vkGetImageMemoryRequirements(m_device, m_texture.m_image, &memoryRequirements);
+
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+		if (memoryRequirements.memoryTypeBits & 1 << i
+			&&
+			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+		{
+			VkMemoryAllocateInfo allocateInfo =
+			{
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				nullptr,
+				memoryRequirements.size,
+				i
+			};
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_texture.m_deviceMemory);
+			if (result == VK_SUCCESS)
+			{
+				break;
+			}
+		}
+	}
+	if (m_texture.m_deviceMemory == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+	result = vkBindImageMemory(m_device, m_texture.m_image, m_texture.m_deviceMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	VkImageViewCreateInfo imageViewCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+		nullptr,
+		0,
+		m_texture.m_image,
+		VK_IMAGE_VIEW_TYPE_2D,
+		VK_FORMAT_R8G8B8A8_UNORM,
+		{
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+			VK_COMPONENT_SWIZZLE_IDENTITY,
+		},
+		{
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			0,
+			1,
+			0,
+			1
+		},
+	};
+	result = vkCreateImageView(m_device, &imageViewCreateInfo, nullptr, &m_texture.m_imageView);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkSamplerCreateInfo samplerCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+		nullptr, 
+		0,
+		VK_FILTER_LINEAR,
+		VK_FILTER_LINEAR,
+		VK_SAMPLER_MIPMAP_MODE_NEAREST,
+		VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		0,
+		VK_FALSE,
+		1,
+		VK_FALSE,
+		VK_COMPARE_OP_ALWAYS,
+		0,
+		0,
+		VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+		VK_FALSE,
+	};
+	result = vkCreateSampler(m_device, &samplerCreateInfo, nullptr, &m_texture.m_sampler);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
 	void* mappedPtr;
-	result = vkMapMemory(m_device, m_vertexBuffer.m_deviceMemory, 0, m_vertexBuffer.m_size, 0, &mappedPtr);
+	result = vkMapMemory(m_device, m_stagingBuffer.m_deviceMemory, 0, imageSize, 0, &mappedPtr);
 	if (result != VK_SUCCESS)
 	{
 		return false;
 	}
-	memcpy(mappedPtr, vertexData, m_vertexBuffer.m_size);
+	memcpy(mappedPtr, imageData, imageSize);
 	VkMappedMemoryRange mappedMemoryRange =
 	{
 		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
 		nullptr,
-		m_vertexBuffer.m_deviceMemory,
+		m_stagingBuffer.m_deviceMemory,
 		0,
-		m_vertexBuffer.m_size,
+		imageSize,
 	};
 	vkFlushMappedMemoryRanges(m_device, 1, &mappedMemoryRange);
-	vkUnmapMemory(m_device, m_vertexBuffer.m_deviceMemory);
+	vkUnmapMemory(m_device, m_stagingBuffer.m_deviceMemory);
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo =
+	{
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		nullptr,
+		VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		nullptr,
+	};
+
+	VkCommandBuffer commandBuffer = m_renderingResources[0].m_commandBuffer;
+	vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
+
+	VkImageSubresourceRange imageSubresourceRange =
+	{
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		0,
+		1,
+		0,
+		1
+	};
+	VkImageMemoryBarrier imageMemoryBarrier =
+	{
+		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		nullptr,
+		0,
+		VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_IMAGE_LAYOUT_UNDEFINED,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_QUEUE_FAMILY_IGNORED,
+		VK_QUEUE_FAMILY_IGNORED,
+		m_texture.m_image,
+		imageSubresourceRange,
+	};
+
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier);
+
+	VkBufferImageCopy bufferImageCopy =
+	{
+		0,
+		0,
+		0,
+		{
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			0,
+			0,
+			1,
+		},
+		{
+			0,
+			0,
+			0,
+		},
+		{
+			width,
+			height,
+			1,
+		},
+	};
+
+	vkCmdCopyBufferToImage(commandBuffer, m_stagingBuffer.m_buffer, m_texture.m_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1, &bufferImageCopy);
+
+	VkImageMemoryBarrier imageMemoryBarrier2 =
+	{
+		VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		nullptr,
+		VK_ACCESS_TRANSFER_WRITE_BIT,
+		VK_ACCESS_SHADER_READ_BIT,
+		VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		VK_QUEUE_FAMILY_IGNORED,
+		VK_QUEUE_FAMILY_IGNORED,
+		m_texture.m_image,
+		imageSubresourceRange,
+	};
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &imageMemoryBarrier2);
+
+	vkEndCommandBuffer(commandBuffer);
+	VkSubmitInfo submitInfo =
+	{
+		VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		nullptr,
+		0,
+		nullptr,
+		0,
+		1,
+		&commandBuffer,
+		0,
+		nullptr,
+	};
+	result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkDeviceWaitIdle(m_device);
 	return true;
 }
 
-bool Tutorial02::createVertexBuffer2()
+bool Tutorial03::createVertexBuffer()
 {
 	VkResult result;
 	VertexData vertexData[] =
 	{
 	  {
 		-0.7f, -0.7f, 0.0f, 1.0f,
-		1.0f, 0.0f, 0.0f, 0.0f
+		-0.1f, -0.1f,
 	  },
 	  {
 		-0.7f, 0.7f, 0.0f, 1.0f,
-		0.0f, 1.0f, 0.0f, 0.0f
+		-0.1f, 1.1f,
 	  },
 	  {
 		0.7f, -0.7f, 0.0f, 1.0f,
-		0.0f, 0.0f, 1.0f, 0.0f
+		1.1f, -0.1f,
 	  },
 	  {
 		0.7f, 0.7f, 0.0f, 1.0f,
-		0.3f, 0.3f, 0.3f, 0.0f
+		1.1f, 1.1f,
 	  }
 	};
 
@@ -950,60 +1200,9 @@ bool Tutorial02::createVertexBuffer2()
 		return false;
 	}
 
-	VkBufferCreateInfo stagingBufferCreateInfo =
-	{
-		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-		nullptr,
-		0,
-		m_vertexBuffer.m_size,
-		VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-		VK_SHARING_MODE_EXCLUSIVE,
-		0,
-		nullptr,
-	};
-	
-	VkBuffer stagingBuffer;
-	result = vkCreateBuffer(m_device, &stagingBufferCreateInfo, nullptr, &stagingBuffer);
-	if (result != VK_SUCCESS)
-	{
-		return false;
-	}
-
-	vkGetBufferMemoryRequirements(m_device, stagingBuffer, &memoryRequirements);
-
-	VkDeviceMemory stagingMemory = VK_NULL_HANDLE;
-	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
-	{
-		if (memoryRequirements.memoryTypeBits & 1 << i
-			&&
-			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-		{
-			VkMemoryAllocateInfo allocateInfo =
-			{
-				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-				nullptr,
-				m_vertexBuffer.m_size,
-				i
-			};
-			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &stagingMemory);
-			if (result == VK_SUCCESS)
-			{
-				break;
-			}
-		}
-	}
-	if (stagingMemory == VK_NULL_HANDLE)
-	{
-		return false;
-	}
-	result = vkBindBufferMemory(m_device, stagingBuffer, stagingMemory, 0);
-	if (result != VK_SUCCESS)
-	{
-		return false;
-	}
 
 	void* mappedPtr;
-	result = vkMapMemory(m_device, stagingMemory, 0, m_vertexBuffer.m_size, 0, &mappedPtr);
+	result = vkMapMemory(m_device, m_stagingBuffer.m_deviceMemory, 0, m_vertexBuffer.m_size, 0, &mappedPtr);
 	if (result != VK_SUCCESS)
 	{
 		return false;
@@ -1013,12 +1212,12 @@ bool Tutorial02::createVertexBuffer2()
 	{
 		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
 		nullptr,
-		stagingMemory,
+		m_stagingBuffer.m_deviceMemory,
 		0,
 		m_vertexBuffer.m_size,
 	};
 	vkFlushMappedMemoryRanges(m_device, 1, &mappedMemoryRange);
-	vkUnmapMemory(m_device, stagingMemory);
+	vkUnmapMemory(m_device, m_stagingBuffer.m_deviceMemory);
 
 	VkCommandBufferBeginInfo commandBufferBeginInfo =
 	{
@@ -1038,7 +1237,7 @@ bool Tutorial02::createVertexBuffer2()
 		0,
 		m_vertexBuffer.m_size,
 	};
-	vkCmdCopyBuffer(commandBuffer, stagingBuffer, m_vertexBuffer.m_buffer, 1, &bufferCopy);
+	vkCmdCopyBuffer(commandBuffer, m_stagingBuffer.m_buffer, m_vertexBuffer.m_buffer, 1, &bufferCopy);
 
 	VkBufferMemoryBarrier bufferMemoryBarrier =
 	{
@@ -1075,13 +1274,273 @@ bool Tutorial02::createVertexBuffer2()
 	return true;
 }
 
-bool Tutorial02::createPipeline()
+bool Tutorial03::createUniformBuffer()
+{
+	VkResult result;
+	float uniformData[4] =
+	{
+		1,0,0,1,
+	};
+
+	VkMemoryRequirements memoryRequirements;
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
+
+	m_uniformBuffer.m_size = sizeof(uniformData);
+
+	VkBufferCreateInfo deviceBufferCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+		nullptr,
+		0,
+		m_uniformBuffer.m_size,
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+		VK_SHARING_MODE_EXCLUSIVE,
+		0,
+		nullptr,
+	};
+	result = vkCreateBuffer(m_device, &deviceBufferCreateInfo, nullptr, &m_uniformBuffer.m_buffer);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkGetBufferMemoryRequirements(m_device, m_uniformBuffer.m_buffer, &memoryRequirements);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; ++i)
+	{
+		if (memoryRequirements.memoryTypeBits & 1 << i
+			&&
+			memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)
+		{
+			VkMemoryAllocateInfo allocateInfo =
+			{
+				VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+				nullptr,
+				m_uniformBuffer.m_size,
+				i
+			};
+			result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_uniformBuffer.m_deviceMemory);
+			if (result == VK_SUCCESS)
+			{
+				break;
+			}
+		}
+	}
+	if (m_uniformBuffer.m_deviceMemory == VK_NULL_HANDLE)
+	{
+		return false;
+	}
+	result = vkBindBufferMemory(m_device, m_uniformBuffer.m_buffer, m_uniformBuffer.m_deviceMemory, 0);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+
+	void* mappedPtr;
+	result = vkMapMemory(m_device, m_stagingBuffer.m_deviceMemory, 0, m_uniformBuffer.m_size, 0, &mappedPtr);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	memcpy(mappedPtr, uniformData, m_uniformBuffer.m_size);
+	VkMappedMemoryRange mappedMemoryRange =
+	{
+		VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
+		nullptr,
+		m_stagingBuffer.m_deviceMemory,
+		0,
+		m_uniformBuffer.m_size,
+	};
+	vkFlushMappedMemoryRanges(m_device, 1, &mappedMemoryRange);
+	vkUnmapMemory(m_device, m_stagingBuffer.m_deviceMemory);
+
+	VkCommandBufferBeginInfo commandBufferBeginInfo =
+	{
+		VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+		nullptr,
+		VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+		nullptr,
+	};
+
+	VkCommandBuffer commandBuffer = m_renderingResources[0].m_commandBuffer;
+
+	vkBeginCommandBuffer(commandBuffer, &commandBufferBeginInfo);
+
+	VkBufferCopy bufferCopy =
+	{
+		0,
+		0,
+		m_uniformBuffer.m_size,
+	};
+	vkCmdCopyBuffer(commandBuffer, m_stagingBuffer.m_buffer, m_uniformBuffer.m_buffer, 1, &bufferCopy);
+
+	VkBufferMemoryBarrier bufferMemoryBarrier =
+	{
+		VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+		nullptr,
+		VK_ACCESS_MEMORY_WRITE_BIT,
+		VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+		VK_QUEUE_FAMILY_IGNORED,
+		VK_QUEUE_FAMILY_IGNORED,
+		m_uniformBuffer.m_buffer,
+		0,
+		VK_WHOLE_SIZE,
+	};
+	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 1, &bufferMemoryBarrier, 0, nullptr);
+	vkEndCommandBuffer(commandBuffer);
+	VkSubmitInfo submitInfo =
+	{
+		VK_STRUCTURE_TYPE_SUBMIT_INFO,
+		nullptr,
+		0,
+		nullptr,
+		0,
+		1,
+		&commandBuffer,
+		0,
+		nullptr,
+	};
+	result = vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	vkDeviceWaitIdle(m_device);
+	return true;
+
+}
+
+bool Tutorial03::createDescriptorSet()
+{
+	VkResult result;
+	VkDescriptorSetLayoutBinding descriptorSetLayoutBindings[] =
+	{
+		{
+			0,
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			1,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			nullptr,
+		},
+		{
+			1,
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			1,
+			VK_SHADER_STAGE_FRAGMENT_BIT,
+			nullptr,
+		},
+	};
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+		nullptr,
+		0,
+		sizeof(descriptorSetLayoutBindings)/sizeof(descriptorSetLayoutBindings[0]),
+		descriptorSetLayoutBindings,
+	};
+	result = vkCreateDescriptorSetLayout(m_device, &descriptorSetLayoutCreateInfo, nullptr, &m_descriptorSet.m_descriptorSetLayout);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkDescriptorPoolSize descriptorPoolSizes[] =
+	{
+		{
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			1,
+		},
+		{
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			1,
+		},
+	};
+
+	VkDescriptorPoolCreateInfo descriptorPoolCreateInfo =
+	{
+		VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+		nullptr,
+		0,
+		1,
+		sizeof(descriptorPoolSizes)/ sizeof(descriptorPoolSizes[0]),
+		descriptorPoolSizes,
+	};
+
+	result = vkCreateDescriptorPool(m_device, &descriptorPoolCreateInfo, nullptr, &m_descriptorSet.m_descriptorPool);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+
+	VkDescriptorSetAllocateInfo descriptorSetAllocateInfo =
+	{
+		VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+		nullptr, 
+		m_descriptorSet.m_descriptorPool,
+		1,
+		&m_descriptorSet.m_descriptorSetLayout,
+	};
+
+	result = vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_descriptorSet.m_descriptorSet);
+	if (result != VK_SUCCESS)
+	{
+		return false;
+	}
+	
+	VkDescriptorImageInfo descriptorImageInfo = 
+	{
+		m_texture.m_sampler,
+		m_texture.m_imageView,
+		VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	};
+
+	VkDescriptorBufferInfo descriptorBufferInfo =
+	{
+		m_uniformBuffer.m_buffer,
+		0,
+		m_uniformBuffer.m_size,
+	};
+
+	VkWriteDescriptorSet writeDescriptorSets[] =
+	{
+		{
+			VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			nullptr,
+			m_descriptorSet.m_descriptorSet,
+			0,
+			0,
+			1,
+			VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+			&descriptorImageInfo,
+			nullptr,
+			nullptr,
+		},
+		{
+			VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+			nullptr,
+			m_descriptorSet.m_descriptorSet,
+			1,
+			0,
+			1,
+			VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+			nullptr,
+			&descriptorBufferInfo,
+			nullptr,
+		},
+	};
+	
+	vkUpdateDescriptorSets(m_device, sizeof(writeDescriptorSets) / sizeof(writeDescriptorSets[0]), writeDescriptorSets, 0, nullptr);
+}
+
+bool Tutorial03::createPipeline()
 {
 	std::string path(QCoreApplication::applicationDirPath().toStdString());
 
 	VkResult result;
-	VkShaderModule vertexShaderModule = createShaderModule((path + "/shader02.vert.spv").c_str());
-	VkShaderModule fragmentShaderModule = createShaderModule((path + "/shader02.frag.spv").c_str());
+	VkShaderModule vertexShaderModule = createShaderModule((path + "/shader03.vert.spv").c_str());
+	VkShaderModule fragmentShaderModule = createShaderModule((path + "/shader03.frag.spv").c_str());
 	if (VK_NULL_HANDLE == vertexShaderModule || VK_NULL_HANDLE == fragmentShaderModule)
 	{
 		return false;
@@ -1240,14 +1699,14 @@ bool Tutorial02::createPipeline()
 		VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
 		nullptr,
 		0,
-		0,
-		nullptr,
+		1,
+		&m_descriptorSet.m_descriptorSetLayout,
 		0,
 		nullptr,
 	};
 
-	VkPipelineLayout pipelineLayout;
-	result = vkCreatePipelineLayout(m_device, &layoutCreateInfo, nullptr, &pipelineLayout);
+	
+	result = vkCreatePipelineLayout(m_device, &layoutCreateInfo, nullptr, &m_pipelineLayout);
 	if (result != VK_SUCCESS)
 	{
 		return false;
@@ -1269,7 +1728,7 @@ bool Tutorial02::createPipeline()
 		nullptr,
 		&colorBlendStateCreateInfo,
 		&dynamicStateCreateInfo,
-		pipelineLayout,
+		m_pipelineLayout,
 		m_renderPass,
 		0,
 		VK_NULL_HANDLE,
@@ -1284,7 +1743,7 @@ bool Tutorial02::createPipeline()
 	return true;
 }
 
-bool Tutorial02::draw()
+bool Tutorial03::draw()
 {
 	VkResult result;
 	static uint32_t s_resourceIndex = 0;
@@ -1427,6 +1886,7 @@ bool Tutorial02::draw()
 	vkCmdSetScissor(renderingResource.m_commandBuffer, 0, 1, &scissor);
 	VkDeviceSize offset = 0;
 	vkCmdBindVertexBuffers(renderingResource.m_commandBuffer, 0, 1, &m_vertexBuffer.m_buffer, &offset);
+	vkCmdBindDescriptorSets(renderingResource.m_commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSet.m_descriptorSet, 0, nullptr);
 	vkCmdDraw(renderingResource.m_commandBuffer, 4, 1, 0, 0);
 	vkCmdEndRenderPass(renderingResource.m_commandBuffer);
 
@@ -1500,7 +1960,7 @@ bool Tutorial02::draw()
 }
 
 
-bool Tutorial02::onSizeWindow()
+bool Tutorial03::onSizeWindow()
 {
 	if (!createSwapChain())
 	{
@@ -1509,12 +1969,12 @@ bool Tutorial02::onSizeWindow()
 	return true;
 }
 
-void Tutorial02::resizeEvent(QResizeEvent* e)
+void Tutorial03::resizeEvent(QResizeEvent* e)
 {
 	onSizeWindow();
 }
 
-void Tutorial02::timerEvent(QTimerEvent *event)
+void Tutorial03::timerEvent(QTimerEvent *event)
 {
 	draw();
 }
